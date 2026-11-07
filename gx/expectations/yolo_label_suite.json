@@ -1,0 +1,9 @@
+{
+  "expectations": [],
+  "id": "c3e3f059-5c99-4130-b6fb-1cca82859979",
+  "meta": {
+    "great_expectations_version": "1.23.2"
+  },
+  "name": "yolo_label_suite",
+  "notes": null
+}

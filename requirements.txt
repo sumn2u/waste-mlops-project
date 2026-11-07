@@ -1,0 +1,76 @@
+# ============================================================
+# Core MLOps & Training Dependencies
+# ============================================================
+
+# YOLO training framework (Ultralytics)
+# Provides YOLO model training, validation, and export
+ultralytics>=8.0.0
+
+# PyTorch (YOLO's backend)
+# CUDA version should match your environment (CPU or GPU)
+torch>=2.0.0
+torchvision>=0.15.0
+
+# OpenCV for image processing
+# Used by validate_data.py and monitor.py for feature extraction
+opencv-python>=4.8.0
+
+# ============================================================
+# Data Validation (validate_data.py)
+# ============================================================
+
+# Great Expectations for schema and distribution validation
+# Requires Python 3.10-3.13 [citation:12]
+great_expectations>=1.0.0
+
+# ============================================================
+# Drift Detection (monitor.py)
+# ============================================================
+
+# Evidently for data drift detection
+# Pin version for reproducibility; 0.4.x has the modern Report API [citation:13]
+evidently==0.4.28
+
+# Required for interactive HTML reports in notebooks [citation:13]
+# Use: pip install evidently==0.4.28[jupyter] for notebook environments
+# numpy pinned to avoid compatibility issues with evidently 0.4.x [citation:13]
+numpy>=1.21.0,<2.0
+
+# Scikit-learn for statistical tests used by Evidently
+scikit-learn>=1.0.0
+
+# Pandas for data handling
+pandas>=2.0.0
+
+# ============================================================
+# Model Conversion (for browser deployment)
+# ============================================================
+
+# TensorFlow.js converter - converts models for browser inference
+# Install separately with: pip install tensorflowjs [citation:19]
+tensorflowjs>=4.0.0
+
+# ONNX conversion support (YOLO exports to ONNX)
+onnx>=1.14.0
+onnxruntime>=1.16.0
+
+# ============================================================
+# Experiment Tracking
+# ============================================================
+
+# MLflow for experiment tracking and model registry
+# Ultralytics has native MLflow integration
+mlflow>=2.0.0
+
+# ============================================================
+# Utilities
+# ============================================================
+
+# Kaggle API for dataset download
+kaggle>=1.5.0
+
+# Hugging Face Hub for model upload/download
+huggingface_hub>=0.20.0
+
+# Requests for API calls (triggering retraining)
+requests>=2.28.0
