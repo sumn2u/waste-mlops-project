@@ -7,6 +7,10 @@ Usage:
     python src/upload_model.py
     python src/upload_model.py --repo iamsuman/waste-mlops --repo-type space
     python src/upload_model.py --repo iamsuman/waste-classifier-model --repo-type model
+    python3 src/upload_model.py \
+    --repo iamsuman/waste-mlops \
+    --repo-type space \
+    --token $(hf auth token)
 """
 
 import os

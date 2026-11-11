@@ -354,8 +354,9 @@ python3 src/evaluate.py \
 ```bash
 python3 src/copy_model.py
 python3 src/upload_model.py \
-  --repo iamsuman/waste-mlops \
-  --repo-type space
+    --repo iamsuman/waste-mlops \
+    --repo-type space \
+    --token $(hf auth token)
 ```
 
 Make sure your Hugging Face credentials are configured before uploading.
