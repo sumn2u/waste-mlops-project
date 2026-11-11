@@ -70,3 +70,5 @@ yolov8n.pt
 # ============================================================
 *.log
 .cache/
+reference_features.csv
+production_features.csv

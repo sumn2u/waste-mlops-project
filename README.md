@@ -45,6 +45,7 @@ The workflow brings together dataset versioning, data preparation, validation, m
 - Apply an evaluation gate before promoting a model.
 - Upload model weights to the Hugging Face Hub using the Hub API.
 - Serve image-based predictions through a Gradio application.
+- Generate image features for production drift monitoring.
 - Plan production data-drift monitoring and automated retraining.
 
 ## Supported Waste Classes
@@ -185,10 +186,15 @@ The pipeline is organized into six stages: data management, training, evaluation
 │                         MONITORING (PLANNED)                                │
 │                                                                             │
 │  ┌────────────────────────────┐       ┌──────────────────────────────────┐  │
+│  │ generate_features.py       │──────▶│ reference_features.csv           │  │
+│  │ • Extract image features   │       │ production_features.csv          │  │
+│  │ • Verify schemas match     │       └────────────────┬─────────────────┘  │
+│  └────────────────────────────┘                        │                    │
+│                                                        ▼                    │
+│  ┌────────────────────────────┐       ┌──────────────────────────────────┐  │
 │  │ Evidently                  │──────▶│ Drift report                     │  │
 │  │ (DataDriftPreset)          │       │ drift_report.html                │  │
 │  └──────────────┬─────────────┘       └──────────────────────────────────┘  │
-│                 │                                                           │
 │                 ▼                                                           │
 │  ┌────────────────────────────┐                                             │
 │  │ Trigger retraining         │──────────────▶ Back to train.py             │
@@ -210,6 +216,7 @@ The pipeline is organized into six stages: data management, training, evaluation
 | Evaluation | `evaluate.py` | Compare validation mAP50 with a configured threshold |
 | Model synchronization | `copy_model.py`, `upload_model.py` | Validate, copy, and publish model weights |
 | Deployment | Gradio + Hugging Face Spaces | Host the prediction interface and allocate GPU on demand |
+| Feature generation | `generate_features.py` | Extract image statistics for drift monitoring |
 | Monitoring | `monitor.py` | Planned data-drift reporting and retraining trigger |
 
 ## Repository Structure
@@ -241,6 +248,7 @@ waste-mlops-project/
 │   ├── copy_model.py           # Copy trained weights to app/
 │   ├── data.yaml               # Dataset and class configuration
 │   ├── evaluate.py             # Model evaluation and promotion gate
+│   ├── generate_features.py    # Extract image features for drift monitoring
 │   ├── monitor.py              # Data-drift monitoring
 │   ├── prepare_data.py         # Dataset reorganization
 │   ├── train.py                # YOLO training with MLflow
@@ -250,6 +258,8 @@ waste-mlops-project/
 ├── .gitignore
 ├── data.dvc                    # DVC dataset pointer
 ├── mlflow.db                   # MLflow SQLite backend (ignored)
+├── reference_features.csv      # Baseline features for drift monitoring (ignored)
+├── production_features.csv     # Production features for drift monitoring (ignored)
 ├── requirements.txt            # Pipeline dependencies
 └── README.md
 ```
@@ -273,6 +283,7 @@ waste-mlops-project/
 | GPU allocation | `spaces.GPU` | `duration=60` | On-demand ZeroGPU allocation |
 | Runtime download | `hf_hub_download` | — | Download model weights at application startup |
 | Inference | Ultralytics YOLO, OpenCV, Pillow | — | Object detection and image annotation |
+| Feature extraction | OpenCV, pandas | `generate_features.py` | Extract RGB means, brightness, dimensions for drift detection |
 | Deployment | [Hugging Face Spaces](https://huggingface.co/spaces) | Gradio SDK / ZeroGPU | Host the inference application |
 | Monitoring | [Evidently](https://www.evidentlyai.com/) | 0.4.28 (planned) | Detect production data drift |
 | Retraining trigger | GitHub Actions API | Planned | Trigger a retraining workflow |
@@ -349,7 +360,28 @@ python3 src/evaluate.py \
   --threshold 0.75
 ```
 
-### 7. Publish the model
+### 7. Generate features for drift monitoring
+
+Extract image statistics from the training and validation folders. This creates the two CSVs that `monitor.py` compares:
+
+```bash
+python3 src/generate_features.py
+```
+This writes:
+
+- `reference_features.csv` — baseline features from `data/processed/images/train/`
+- `production_features.csv` — comparison features from `data/processed/images/val/`
+
+Optionally override the source folders:
+
+```bash
+python3 src/generate_features.py \
+  --reference-dir data/processed/images/train \
+  --production-dir data/processed/images/val \
+  --max-samples 1000
+```
+
+### 8. Publish the model
 
 ```bash
 python3 src/copy_model.py
@@ -376,7 +408,8 @@ The main pipeline scripts and their outputs are summarized below.
 | 7 | `copy_model.py` | `app/best.pt` |
 | 8 | `upload_model.py` | Model weights in the Hugging Face Space repository |
 | 9 | Gradio + Hugging Face Spaces | Live inference application |
-| 10 | `monitor.py` | `drift_report.html` (planned) |
+| 10 | `generate_features.py` | `reference_features.csv` and `production_features.csv` |
+| 11 | `monitor.py` | `drift_report.html` (planned) |
 
 ### Evaluation and promotion
 
@@ -430,10 +463,36 @@ The application dependencies are maintained separately in `app/requirements.txt`
 
 **Status: Planned**
 
-Production data-drift monitoring is planned with Evidently. The `monitor.py` workflow is intended to:
+Production data-drift monitoring is planned with Evidently. The monitoring workflow has two parts.
 
-- Compare production image features against the training baseline.
-- Use statistical tests such as the Kolmogorov–Smirnov (K-S) test and chi-square test to detect distribution shifts.
+### Feature generation (implemented)
+
+`generate_features.py` extracts seven numerical features from each image:
+
+| Feature | Description |
+|---|---|
+| `mean_r` | Mean red channel value |
+| `mean_g` | Mean green channel value |
+| `mean_b` | Mean blue channel value |
+| `brightness` | Mean grayscale value |
+| `width` | Image width in pixels |
+| `height` | Image height in pixels |
+| `aspect_ratio` | width / height |
+
+It writes two CSVs with identical schemas:
+
+- `reference_features.csv` — from the training folder (baseline)
+- `production_features.csv` — from the validation folder (or real production logs later)
+
+The script verifies that both CSVs have the same columns before exiting, so `monitor.py` cannot silently compare mismatched schemas.
+
+### Drift detection (planned)
+
+`monitor.py` is intended to:
+
+- Load `reference_features.csv` and `production_features.csv`.
+- Compare distributions using Evidently's `DataDriftPreset`.
+- Use statistical tests such as the Kolmogorov–Smirnov (K-S) test and chi-square test.
 - Generate an HTML report named `drift_report.html`.
 - Trigger retraining through the GitHub API when drift exceeds a configured threshold.
 
@@ -444,6 +503,7 @@ The intended long-term workflow closes the loop by feeding a retraining trigger 
 | Component | Current state | Planned next step |
 |---|---|---|
 | Model quality | Smoke test reported mAP50 of approximately 0.03 | Full 100-epoch training; target mAP50 above 0.5 |
+| Feature generation | Implemented (`generate_features.py`) | Extend to log real production features from the Gradio app |
 | Data-drift monitoring | Script written; not deployed | Evidently report and scheduled monitoring job |
 | Automated retraining | Manual | GitHub Actions trigger based on detected drift |
 | CI/CD | Manual `git push` | GitHub Actions deployment workflow for Hugging Face |
@@ -462,6 +522,7 @@ The intended long-term workflow closes the loop by feeding a retraining trigger 
 | **`@spaces.GPU(duration=60)`** | Requests GPU resources for inference on demand. |
 | **Separate `app/` directory** | Keeps deployment code and application dependencies separate from the training pipeline. |
 | **Evaluation gate before deployment** | Prevents a model below the configured evaluation threshold from being promoted. |
+| **Image statistics for drift monitoring** | RGB means, brightness, and dimensions are cheap to compute, schema-stable, and sensitive to lighting, camera, and resolution shifts that matter for waste detection. |
 
 ## License and Acknowledgments
 
