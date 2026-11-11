@@ -1,5 +1,8 @@
 name: MLOps Pipeline
-on: [push]
+
+on:
+  push:
+    branches: [main]
 
 jobs:
   validate-data:
@@ -10,7 +13,7 @@ jobs:
       - run: python src/validate_data.py
 
   train-and-evaluate:
-    needs: validate-data  # Waits for validation
+    needs: validate-data
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -19,12 +22,15 @@ jobs:
       - run: python src/evaluate.py
 
   deploy:
-    needs: train-and-evaluate  # Waits for evaluation gate
+    needs: train-and-evaluate
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: BetaHuhn/deploy-to-vercel-action@v1
+      - uses: actions/checkout@v6
+      - uses: huggingface/hub-sync@v0.3.0
         with:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          github_repo_id: ${{ github.repository }}
+          huggingface_repo_id: iamsuman/waste-mlops
+          hf_token: ${{ secrets.HF_TOKEN }}
+          repo_type: space
+          space_sdk: gradio
+          subdirectory: app
