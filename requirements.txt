@@ -13,6 +13,8 @@ torchvision>=0.15.0
 
 # OpenCV for image processing
 # Used by validate_data.py and monitor.py for feature extraction
+# Upper bound <4.12.0 is required because 4.12+ mandates numpy>=2,
+# which conflicts with evidently 0.4.28 (see numpy pin below)
 opencv-python>=4.8.0,<4.12.0
 
 # ============================================================
@@ -20,7 +22,8 @@ opencv-python>=4.8.0,<4.12.0
 # ============================================================
 
 # Great Expectations for schema and distribution validation
-# Requires Python 3.10-3.13 [citation:12]
+# IMPORTANT: on Python 3.13, great_expectations forces numpy>=2.1.0,
+# which is incompatible with evidently 0.4.28. Use Python 3.12.
 great_expectations>=1.0.0
 
 # ============================================================
@@ -28,13 +31,14 @@ great_expectations>=1.0.0
 # ============================================================
 
 # Evidently for data drift detection
-# Pin version for reproducibility; 0.4.x has the modern Report API [citation:13]
+# 0.4.x has the modern Report API; 0.4.28 is not compatible with numpy 2.x
 evidently==0.4.28
 
-# Required for interactive HTML reports in notebooks [citation:13]
-# Use: pip install evidently==0.4.28[jupyter] for notebook environments
-# numpy pinned to avoid compatibility issues with evidently 0.4.x [citation:13]
-numpy>=1.21.0,<2.0
+# numpy pinned to the last stable 1.x release.
+# - evidently 0.4.28 breaks on numpy 2.0 (removed np.float_ etc.)
+# - opencv-python <4.12.0 still supports numpy 1.x
+# - great_expectations resolves to numpy 1.26.4 on Python 3.12
+numpy==1.26.4
 
 # Scikit-learn for statistical tests used by Evidently
 scikit-learn>=1.0.0
@@ -47,7 +51,7 @@ pandas>=2.0.0
 # ============================================================
 
 # TensorFlow.js converter - converts models for browser inference
-# Install separately with: pip install tensorflowjs [citation:19]
+# Install separately with: pip install tensorflowjs
 tensorflowjs>=4.0.0
 
 # ONNX conversion support (YOLO exports to ONNX)
