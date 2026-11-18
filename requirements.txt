@@ -13,7 +13,7 @@ torchvision>=0.15.0
 
 # OpenCV for image processing
 # Used by validate_data.py and monitor.py for feature extraction
-opencv-python>=4.8.0
+opencv-python>=4.8.0,<4.12.0
 
 # ============================================================
 # Data Validation (validate_data.py)
