@@ -1,4 +1,3 @@
-%%writefile src/register_model.py
 """
 Register a trained YOLO waste-classification model in the MLflow Model Registry.
 
