@@ -10,7 +10,7 @@
 [![Tracking](https://img.shields.io/badge/Experiments-MLflow-blue)](https://mlflow.org/)
 [![Data Versioning](https://img.shields.io/badge/Data-DVC-945DD6)](https://dvc.org/)
 
-[**Launch the live application**](https://iamsuman-waste-mlops.hf.space) · [Hugging Face Space](https://huggingface.co/spaces/iamsuman/waste-mlops)
+[**Launch the live application**](https://iamsuman-waste-mlops.hf.space) · [Hugging Face Space](https://huggingface.co/spaces/iamsuman/waste-mlops) · [Kaggle Training Notebook](https://www.kaggle.com/code/sumn2u/mlops-garbage-classification-object-detection)
 
 </div>
 
