@@ -1,11 +1,13 @@
 """
 Evaluation gate for YOLO waste classification model.
 Only promotes the model if mAP50 exceeds the threshold.
+Logs eval metrics/artifacts to MLflow (same experiment as train.py).
 
 Usage:
     python src/evaluate.py
-    python src/evaluate.py --model runs/detect/train/weights/best.pt --threshold 0.75
-    python src/evaluate.py --model waste-classification/yolov8n-run/weights/best.pt --threshold 0.5
+    python src/evaluate.py --model runs/detect/waste-classification/yolov8n-run/weights/best.pt --threshold 0.5
+    python src/evaluate.py --model waste-classification/yolov8n-run/weights/best.pt --threshold 0.5 --experiment garbage-detector
+    python src/evaluate.py --no-mlflow     # offline / smoke test
 """
 
 import os
@@ -14,7 +16,14 @@ import json
 import argparse
 from pathlib import Path
 
+# ============================================================
+# MLFLOW FIX: set the SQLite tracking URI BEFORE importing Ultralytics
+# so eval runs land in the same store as training/registration.
+# ============================================================
+os.environ.setdefault("MLFLOW_TRACKING_URI", "sqlite:///mlflow.db")
+
 from ultralytics import YOLO
+import mlflow
 
 
 def parse_args():
@@ -50,7 +59,75 @@ def parse_args():
         action="store_true",
         help="Generate validation plots (confusion matrix, PR curves)",
     )
+    # ----- NEW -----
+    parser.add_argument(
+        "--experiment",
+        type=str,
+        default="garbage-detector",
+        help="MLflow experiment name (must match train.py / register_model.py)",
+    )
+    parser.add_argument(
+        "--no-mlflow",
+        action="store_true",
+        help="Disable MLflow logging (offline / smoke test).",
+    )
     return parser.parse_args()
+
+
+def _log_to_mlflow(args, metrics, result, per_class):
+    """Log eval metrics + artifacts to the active MLflow run."""
+    mAP50 = result["mAP50"]
+    mAP50_95 = result["mAP50_95"]
+    promote = result["promote"]
+
+    # Parameters (also logged at start of the run below, but harmless here)
+    mlflow.log_params({
+        "model": args.model,
+        "data": args.data,
+        "threshold": args.threshold,
+        "output": args.output,
+    })
+
+    # Scalars — use `eval/` prefix so they don't collide with train metrics
+    mlflow.log_metrics({
+        "eval/mAP50": mAP50,
+        "eval/mAP50-95": mAP50_95,
+        "eval/threshold": float(args.threshold),
+        "eval/promote": 1.0 if promote else 0.0,
+    })
+
+    # Per-class — mirror train.py naming so charts align
+    for name, m in per_class.items():
+        mlflow.log_metric(f"per_class/{name}/mAP50", m["mAP50"])
+        mlflow.log_metric(f"per_class/{name}/mAP50-95", m["mAP50-95"])
+        mlflow.log_metric(f"per_class/{name}/precision", m["precision"])
+        mlflow.log_metric(f"per_class/{name}/recall", m["recall"])
+
+    # Tags so runs are filterable in the UI
+    mlflow.set_tag("stage", "evaluate")
+    mlflow.set_tag("promotion_passed", str(promote))
+    mlflow.set_tag("promotion_threshold", str(args.threshold))
+    mlflow.set_tag("source_weights", str(Path(args.model).resolve()))
+
+    # metrics.json artifact
+    if Path(args.output).exists():
+        mlflow.log_artifact(args.output, artifact_path="eval")
+
+    # Plots artifact (only if --plots wrote them)
+    if args.plots:
+        save_dir = Path(metrics.save_dir) if hasattr(metrics, "save_dir") else None
+        if save_dir and save_dir.exists():
+            for fname in [
+                "confusion_matrix.png",
+                "confusion_matrix_normalized.png",
+                "PR_curve.png",
+                "F1_curve.png",
+                "P_curve.png",
+                "R_curve.png",
+            ]:
+                f = save_dir / fname
+                if f.exists():
+                    mlflow.log_artifact(str(f), artifact_path="eval/plots")
 
 
 def evaluate(args):
@@ -69,9 +146,10 @@ def evaluate(args):
     print("=" * 60)
     print("Model Evaluation Gate")
     print("=" * 60)
-    print(f"Model:     {args.model}")
-    print(f"Data:      {args.data}")
-    print(f"Threshold: mAP50 > {args.threshold}")
+    print(f"Model:      {args.model}")
+    print(f"Data:       {args.data}")
+    print(f"Threshold:  mAP50 > {args.threshold}")
+    print(f"Experiment: {args.experiment}" + (" (MLflow disabled)" if args.no_mlflow else ""))
     print("=" * 60)
 
     # ============================================================
@@ -93,10 +171,9 @@ def evaluate(args):
     mAP50 = float(metrics.box.map50)
     mAP50_95 = float(metrics.box.map)
 
-    # Per-class metrics
     per_class = {}
     try:
-        names = metrics.names  # {0: 'biological', 1: 'cardboard', ...}
+        names = metrics.names
         for i, name in names.items():
             per_class[name] = {
                 "precision": float(metrics.box.p[i]),
@@ -111,7 +188,6 @@ def evaluate(args):
     # STEP 4: Apply promotion gate
     # ============================================================
     promote = mAP50 > args.threshold
-
     result = {
         "model": args.model,
         "mAP50": mAP50,
@@ -128,7 +204,17 @@ def evaluate(args):
         json.dump(result, f, indent=2)
 
     # ============================================================
-    # STEP 6: Report
+    # STEP 6: Log to MLflow (if enabled)
+    # ============================================================
+    if not args.no_mlflow:
+        mlflow.set_tracking_uri(os.environ["MLFLOW_TRACKING_URI"])
+        mlflow.set_experiment(args.experiment)
+        with mlflow.start_run(run_name=f"eval-{model_path.parent.parent.name}") as run:
+            _log_to_mlflow(args, metrics, result, per_class)
+            print(f"\nMLflow run ID: {run.info.run_id}")
+
+    # ============================================================
+    # STEP 7: Report
     # ============================================================
     print("\n" + "=" * 60)
     print("Evaluation Results")
@@ -146,11 +232,11 @@ def evaluate(args):
     print(f"\nResults written to: {args.output}")
 
     # ============================================================
-    # STEP 7: Exit with appropriate code
+    # STEP 8: Exit with appropriate code
     # ============================================================
     if not promote:
         print("\n" + "=" * 60)
-        print(f"MODEL FAILED PROMOTION GATE")
+        print("MODEL FAILED PROMOTION GATE")
         print(f"mAP50 ({mAP50:.4f}) is below threshold ({args.threshold})")
         print("Deployment BLOCKED.")
         print("=" * 60)
