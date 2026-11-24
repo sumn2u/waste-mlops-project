@@ -96,6 +96,33 @@ def _log_to_mlflow(args, metrics, result, per_class):
         "eval/promote": 1.0 if promote else 0.0,
     })
 
+    # ============================================================
+    # NEW: Standard aggregate detection metrics.
+    #
+    # Ultralytics returns precision/recall as *per-class arrays*.
+    # `.mean()` gives the standard summary numbers that every
+    # detection paper/report quotes. F1 is derived from them.
+    # These are the missing "standard" scalars for an eval gate.
+    # ============================================================
+    try:
+        precision = float(metrics.box.p.mean())
+        recall = float(metrics.box.r.mean())
+        f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
+        mlflow.log_metrics({
+            "eval/precision": precision,
+            "eval/recall": recall,
+            "eval/f1": f1,
+        })
+    except Exception as e:
+        print(f"(skipping aggregate precision/recall/f1: {e})")
+
+    # Number of validation images — useful context when comparing runs
+    try:
+        n_val = len(metrics.data.val)
+        mlflow.log_metric("eval/num_val_images", float(n_val))
+    except Exception as e:
+        print(f"(skipping num_val_images: {e})")
+
     # Per-class — mirror train.py naming so charts align
     for name, m in per_class.items():
         mlflow.log_metric(f"per_class/{name}/mAP50", m["mAP50"])
@@ -167,9 +194,21 @@ def evaluate(args):
 
     # ============================================================
     # STEP 3: Extract metrics
+    #
+    # NOTE: we also pull mean precision/recall/F1 here so they end up
+    # in metrics.json (the artifact) — the standard summary block.
     # ============================================================
     mAP50 = float(metrics.box.map50)
     mAP50_95 = float(metrics.box.map)
+
+    # Standard aggregate detection metrics
+    precision_mean = float(metrics.box.p.mean())
+    recall_mean = float(metrics.box.r.mean())
+    f1_mean = (
+        2 * precision_mean * recall_mean / (precision_mean + recall_mean)
+        if (precision_mean + recall_mean) > 0
+        else 0.0
+    )
 
     per_class = {}
     try:
@@ -192,6 +231,9 @@ def evaluate(args):
         "model": args.model,
         "mAP50": mAP50,
         "mAP50_95": mAP50_95,
+        "precision": precision_mean,
+        "recall": recall_mean,
+        "f1": f1_mean,
         "threshold": args.threshold,
         "promote": promote,
         "per_class": per_class,
@@ -219,10 +261,13 @@ def evaluate(args):
     print("\n" + "=" * 60)
     print("Evaluation Results")
     print("=" * 60)
-    print(f"mAP50:    {mAP50:.4f}")
-    print(f"mAP50-95: {mAP50_95:.4f}")
+    print(f"mAP50:     {mAP50:.4f}")
+    print(f"mAP50-95:  {mAP50_95:.4f}")
+    print(f"Precision: {precision_mean:.4f}")
+    print(f"Recall:    {recall_mean:.4f}")
+    print(f"F1:        {f1_mean:.4f}")
     print(f"Threshold: {args.threshold}")
-    print(f"Promote:  {promote}")
+    print(f"Promote:   {promote}")
 
     if per_class:
         print("\nPer-class mAP50:")

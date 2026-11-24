@@ -35,6 +35,9 @@ from ultralytics import settings, YOLO
 # in `with mlflow.start_run(...)` puts everything in one run.
 import mlflow
 
+# pandas is needed to parse results.csv for the step-based loss curves.
+import pandas as pd
+
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -189,6 +192,59 @@ def _dataset_stats(data_yaml: str) -> dict:
         "dataset/val_images": len(list(val_dir.glob("*"))) if val_dir.exists() else 0,
         "dataset/num_classes": num_classes,
     }
+
+
+def log_loss_curves(save_dir: Path):
+    """
+    Log train/val losses as step-based metrics so the MLflow UI draws curves.
+
+    Why this is needed:
+      Ultralytics' native MLflow integration logs per-epoch losses only into
+      results.csv (as an artifact), not as step-based MLflow metrics. Without
+      this function, the Metrics tab shows no loss curves at all.
+
+    What it does:
+      Reads results.csv (one row per epoch) and logs each loss column as
+      `mlflow.log_metric(name, value, step=epoch)`. MLflow interprets the
+      integer `step` as the x-axis, so the result is a real time-series
+      curve in the UI rather than a single scalar.
+
+    Columns handled (strip whitespace — Ultralytics sometimes pads names):
+      train/box_loss, train/cls_loss, train/dfl_loss,
+      val/box_loss,   val/cls_loss,   val/dfl_loss
+    """
+    csv_path = save_dir / "results.csv"
+    if not csv_path.exists():
+        print(f"(results.csv not found at {csv_path}, skipping loss curves)")
+        return
+
+    df = pd.read_csv(csv_path)
+    # Ultralytics sometimes writes columns with leading spaces
+    df.columns = [c.strip() for c in df.columns]
+
+    # Map CSV column names -> MLflow metric names. Underscores are easier to
+    # select in the UI's metric dropdown than slashes.
+    loss_map = {
+        "train/box_loss": "train_box_loss",
+        "train/cls_loss": "train_cls_loss",
+        "train/dfl_loss": "train_dfl_loss",
+        "val/box_loss":   "val_box_loss",
+        "val/cls_loss":   "val_cls_loss",
+        "val/dfl_loss":   "val_dfl_loss",
+    }
+
+    logged = 0
+    for epoch, row in df.iterrows():
+        step = int(epoch)
+        for csv_col, mlflow_name in loss_map.items():
+            # Skip columns that don't exist in this Ultralytics version,
+            # and skip NaN rows (e.g. a val loss not computed for epoch 0).
+            if csv_col in df.columns and pd.notna(row[csv_col]):
+                mlflow.log_metric(mlflow_name, float(row[csv_col]), step=step)
+                logged += 1
+
+    print(f"Logged {logged} loss points across {len(df)} epochs "
+          f"(metrics: {', '.join(sorted(loss_map.values()))})")
 
 
 def log_custom_metrics(results, data_yaml: str, save_dir: Path | None):
@@ -356,6 +412,11 @@ def main():
             )
 
             save_dir = Path(results.save_dir) if hasattr(results, "save_dir") else None
+
+            # NEW: log step-based loss curves so the Metrics tab has real
+            # charts (Ultralytics only writes losses to results.csv).
+            if save_dir:
+                log_loss_curves(save_dir)
 
             # Add the custom metrics/artifacts on top of Ultralytics' logs.
             log_custom_metrics(results, args.data, save_dir)
